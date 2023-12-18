@@ -1,32 +1,42 @@
 // Yeahbut December 2023
 
-use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
-
-use std::env;
+use tokio::io;
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let listen_addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:25565".to_string());
-    let server_addr = env::args()
-        .nth(2)
-        .unwrap_or_else(|| "127.0.0.1:25566".to_string());
+    let listener = TcpListener::bind("127.0.0.1:25565").await?;
+    println!("Proxy listening on port 25565...");
 
-    println!("Listening on: {}", listen_addr);
-    println!("Proxying to: {}", server_addr);
-
-    let listener = TcpListener::bind(listen_addr).await?;
-
-    while let Ok((mut inbound, _)) = listener.accept().await {
-        let mut outbound = TcpStream::connect(server_addr.clone()).await?;
-
-        tokio::spawn(async move {
-            copy_bidirectional(&mut inbound, &mut outbound).await
-        });
+    while let Ok((client_socket, _)) = listener.accept().await {
+        tokio::spawn(handle_client(client_socket));
     }
 
     Ok(())
+}
+
+async fn handle_client(client_socket: TcpStream) {
+    let backend_addr = "127.0.0.1:25566";
+
+    if let Ok(mut backend_socket) = TcpStream::connect(backend_addr).await {
+        let (mut client_reader, mut client_writer) = client_socket.into_split();
+        let (mut backend_reader, mut backend_writer) = backend_socket.into_split();
+
+        // Forward from client to backend
+        tokio::spawn(async move {
+            if let Err(e) = io::copy(&mut client_reader, &mut backend_writer).await {
+                eprintln!("Error copying from client to backend: {}", e);
+            }
+        });
+
+        // Forward from backend to client
+        tokio::spawn(async move {
+            if let Err(e) = io::copy(&mut backend_reader, &mut client_writer).await {
+                eprintln!("Error copying from backend to client: {}", e);
+            }
+        });
+    } else {
+        eprintln!("Failed to connect to the backend server");
+    }
 }
