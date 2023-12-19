@@ -67,47 +67,6 @@ pub fn write_var_int_bytes(stream: &mut Vec<u8>, mut value: i32) {
     }
 }
 
-pub async fn read_var_long(stream: &mut OwnedReadHalf) -> i64 {
-    let mut value: i64 = 0;
-    let mut position: u32 = 0;
-
-    loop {
-        let current_byte = stream.read_u8()
-            .await
-            .expect("Error reading from stream");
-        value |= ((current_byte & SEGMENT_BITS) as i64) << position;
-
-        if (current_byte & CONTINUE_BIT) == 0 {
-            break;
-        }
-
-        position += 7;
-
-        if position >= 64 {
-            eprintln!("VarLong is too big");
-        }
-    }
-
-    value
-}
-
-pub async fn write_var_long(stream: &mut OwnedWriteHalf, mut value: i64) {
-    loop {
-        if (value & !(SEGMENT_BITS as i64)) == 0 {
-            stream.write_u8(value as u8)
-                .await
-                .expect("Error writing to stream");
-            return;
-        }
-
-        stream.write_u8((value & SEGMENT_BITS as i64) as u8 | CONTINUE_BIT)
-            .await
-            .expect("Error writing to stream");
-
-        value >>= 7;
-    }
-}
-
 pub async fn read_string(stream: &mut OwnedReadHalf) -> String {
     let length = read_var_int(stream).await;
     let mut buffer = vec![0; length as usize];
