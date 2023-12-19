@@ -12,11 +12,12 @@ pub struct Handshake {
 }
 
 pub async fn read_handshake(stream: &mut OwnedReadHalf) -> Handshake {
-    get_handshake(&mut mc_types::read_packet(stream).await)
+    let mut data = mc_types::read_packet(stream).await;
+    let _packet_id = mc_types::get_var_int(&mut data);
+    get_handshake(&mut data)
 }
 
 pub fn get_handshake(data: &mut Vec<u8>) -> Handshake {
-    mc_types::get_var_int(data);
     Handshake {
         protocol_version: mc_types::get_var_int(data),
         server_address: mc_types::get_string(data),

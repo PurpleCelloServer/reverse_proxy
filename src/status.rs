@@ -23,18 +23,21 @@ pub struct StatusPlayerInfo {
 pub struct StatusPlayers {
     pub max: i32,
     pub online: i32,
-    pub sample: Vec<StatusPlayerInfo>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample: Option<Vec<StatusPlayerInfo>>
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct StatusResponse {
+pub struct StatusResponseData {
     pub version: StatusVersion,
     pub description: mc_types::Chat,
     pub players: StatusPlayers,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub favicon: Option<String>,
-    pub enforcesSecureChat: bool,
-    pub previewsChat: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforcesSecureChat: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previewsChat: Option<bool>,
 }
 
 async fn online_players(
@@ -59,15 +62,16 @@ pub async fn respond_status(
     server_writer: &mut OwnedWriteHalf,
 ) {
     loop {
-        let packet_id = client_reader.read_u8()
-            .await.expect("Error reading from stream");
+        println!("Status Handling");
+        let mut data = mc_types::read_packet(client_reader).await;
+        let packet_id = mc_types::get_var_int(&mut data);
 
-        let online_players = online_players(server_reader, server_writer).await;
         println!("Status Packet ID: {}", packet_id);
 
         if packet_id == 0x00 {
             println!("Handling Status");
-            let status_response = StatusResponse {
+            let online_players = online_players(server_reader, server_writer).await;
+            let status_response = StatusResponseData {
                 version: StatusVersion {
                     name: mc_types::VERSION_NAME.to_string(),
                     protocol: mc_types::VERSION_PROTOCOL,
@@ -81,18 +85,19 @@ pub async fn respond_status(
                     sample: online_players.sample,
                 },
                 favicon: favicon(),
-                enforcesSecureChat: false,
-                previewsChat: false,
+                enforcesSecureChat: None,
+                previewsChat: None,
+                // enforcesSecureChat: Some(false),
+                // previewsChat: Some(false),
             };
 
             let json_result = serde_json::to_string(&status_response);
 
             match json_result {
                 Ok(json) => {
-                    client_writer.write_u8(0)
-                        .await.expect("Error writing to stream");
-                    client_writer.write_all(&mc_types::convert_string(&json))
-                        .await.expect("Error writing to stream");
+                    let mut out_data: Vec<u8> = vec![0];
+                    out_data.append(&mut mc_types::convert_string(&json));
+                    mc_types::write_packet(client_writer, &mut out_data).await;
                 },
                 Err(err) => {
                     eprintln!("Error serializing to JSON: {}", err);
@@ -101,12 +106,9 @@ pub async fn respond_status(
             }
         } else if packet_id == 0x01 {
             println!("Handling Ping");
-            let payload = client_reader.read_i64()
-                .await.expect("Error reading from stream");
-            client_writer.write_u8(0)
-                .await.expect("Error writing to stream");
-            client_writer.write_i64(payload)
-                .await.expect("Error writing to stream");
+            let mut out_data: Vec<u8> = vec![1];
+            out_data.append(&mut data);
+            mc_types::write_packet(client_writer, &mut out_data).await;
             break;
         } else {
             break;
@@ -117,20 +119,24 @@ pub async fn respond_status(
 pub async fn get_upstream_status(
     server_reader: &mut OwnedReadHalf,
     server_writer: &mut OwnedWriteHalf,
-) -> StatusResponse {
+) -> StatusResponseData {
     handshake::write_handshake(server_writer, handshake::Handshake{
         protocol_version: mc_types::VERSION_PROTOCOL,
         server_address: "localhost".to_string(),
         server_port: 25565,
         next_state: 1,
     }).await;
-    server_writer.write_u8(0).await.expect("Error writing to stream");
-
+    mc_types::write_packet(server_writer, &mut vec![0]).await;
     let mut data = mc_types::read_packet(server_reader).await;
+
     mc_types::get_u8(&mut data);
     let json = mc_types::get_string(&mut data);
-    let status_response: StatusResponse = serde_json::from_str(&json)
+    let status_response: StatusResponseData = serde_json::from_str(&json)
         .expect("Error parsing JSON");
+
+    // let mut out_data: Vec<u8> = vec![1];
+    // out_data.append(&mut mc_types::convert_i64(0));
+    // mc_types::write_packet(server_writer, &mut out_data).await;
 
     status_response
 }

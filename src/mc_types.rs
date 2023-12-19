@@ -23,10 +23,9 @@ pub async fn read_packet(stream: &mut OwnedReadHalf) -> Vec<u8> {
     buffer
 }
 pub async fn write_packet(stream: &mut OwnedWriteHalf, data: &mut Vec<u8>) {
-    let length = data.len() as i32;
-    stream.write_all(&convert_var_int(length))
-        .await.expect("Error writing to stream");
-    stream.write_all(&data)
+    let mut out_data = convert_var_int(data.len() as i32);
+    out_data.append(data);
+    stream.write_all(&out_data)
         .await.expect("Error writing to stream");
 }
 async fn read_var_int_stream(stream: &mut OwnedReadHalf) -> i32 {
@@ -186,9 +185,9 @@ pub fn convert_var_int(mut value: i32) -> Vec<u8> {
 }
 
 pub fn get_string(data: &mut Vec<u8>) -> String {
-    let length = get_var_int(data);
-    let mut buffer = vec![0; length as usize];
-    data.append(&mut buffer);
+    let length = get_var_int(data) as usize;
+    let buffer = data[..length].to_vec();
+    for _ in 0..length { data.remove(0); }
     String::from_utf8_lossy(&buffer).to_string()
 }
 pub fn convert_string(s: &str) -> Vec<u8> {
