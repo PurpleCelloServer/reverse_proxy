@@ -1,8 +1,12 @@
 // Yeahbut December 2023
 
+use std::fs::File;
+use std::io::Read;
+
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use serde::{Serialize, Deserialize};
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::mc_types;
 use crate::handshake;
@@ -52,7 +56,22 @@ fn motd() -> String {
 }
 
 fn favicon() -> Option<String> {
-    None
+    let file_path = "./main_icon.png";
+
+    let mut file = match File::open(file_path) {
+        Ok(file) => file,
+        Err(_) => return None,
+    };
+
+    let mut buffer = Vec::new();
+    if let Err(_) = file.read_to_end(&mut buffer) {
+        return None
+    }
+
+    let base64_string = general_purpose::STANDARD_NO_PAD.encode(buffer);
+    let full_string = "data:image/png;base64,".to_string() + &base64_string;
+
+    Some(full_string)
 }
 
 pub async fn respond_status(
