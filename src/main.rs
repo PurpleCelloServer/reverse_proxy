@@ -1,7 +1,7 @@
 // Yeahbut December 2023
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{self, AsyncReadExt}; //, AsyncWriteExt};
+use tokio::io;
 use std::error::Error;
 
 mod mc_types;
@@ -27,14 +27,19 @@ async fn handle_client(client_socket: TcpStream) {
 
     let (mut client_reader, mut client_writer) = client_socket.into_split();
     if let Ok(backend_socket) = TcpStream::connect(backend_addr).await {
-        let (mut server_reader, mut server_writer) = backend_socket.into_split();
-        let packet_id = client_reader.read_u8()
+        let (mut server_reader, mut server_writer) =
+            backend_socket.into_split();
+        let mut buffer: [u8; 1] = [0; 1];
+        client_reader.peek(&mut buffer)
             .await.expect("Error reading from stream");
+        let packet_id: u8 = buffer[0];
 
-        println!("Packet ID: {}", packet_id);
-        if packet_id == 0 {
+        if packet_id == 0xFE {
+            status::respond_legacy_status(&mut client_writer).await;
+            return;
+        } else {
             let handshake_packet = handshake::read_handshake(&mut client_reader)
-                .await.unwrap();
+                .await;
             println!("Next state: {}", handshake_packet.next_state);
             if handshake_packet.next_state == 1 {
                 println!("Receiving Status Request");
@@ -50,11 +55,6 @@ async fn handle_client(client_socket: TcpStream) {
             } else {
                 return;
             }
-        } else if packet_id == 0xFE {
-            status::respond_legacy_status(&mut client_writer).await;
-            return;
-        } else {
-            return;
         }
 
         // Forward from client to backend

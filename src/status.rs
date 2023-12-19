@@ -1,34 +1,32 @@
 // Yeahbut December 2023
 
-use std::str::Bytes;
-
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 use crate::mc_types;
 use crate::handshake;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StatusVersion {
     pub name: String,
     pub protocol: i32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StatusPlayerInfo {
     pub name: String,
     pub id: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StatusPlayers {
     pub max: i32,
     pub online: i32,
     pub sample: Vec<StatusPlayerInfo>
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StatusResponse {
     pub version: StatusVersion,
     pub description: mc_types::Chat,
@@ -93,7 +91,8 @@ pub async fn respond_status(
                 Ok(json) => {
                     client_writer.write_u8(0)
                         .await.expect("Error writing to stream");
-                    mc_types::write_string(client_writer, &json).await;
+                    client_writer.write_all(&mc_types::convert_string(&json))
+                        .await.expect("Error writing to stream");
                 },
                 Err(err) => {
                     eprintln!("Error serializing to JSON: {}", err);
@@ -119,23 +118,21 @@ pub async fn get_upstream_status(
     server_reader: &mut OwnedReadHalf,
     server_writer: &mut OwnedWriteHalf,
 ) -> StatusResponse {
-    StatusResponse {
-        version: StatusVersion {
-            name: "1.19.4".to_string(),
-            protocol: 762,
-        },
-        description: mc_types::Chat {
-            text: motd(),
-        },
-        players: StatusPlayers {
-            max: 0,
-            online: 0,
-            sample: vec![],
-        },
-        favicon: favicon(),
-        enforcesSecureChat: false,
-        previewsChat: false,
-    }
+    handshake::write_handshake(server_writer, handshake::Handshake{
+        protocol_version: mc_types::VERSION_PROTOCOL,
+        server_address: "localhost".to_string(),
+        server_port: 25565,
+        next_state: 1,
+    }).await;
+    server_writer.write_u8(0).await.expect("Error writing to stream");
+
+    let mut data = mc_types::read_packet(server_reader).await;
+    mc_types::get_u8(&mut data);
+    let json = mc_types::get_string(&mut data);
+    let status_response: StatusResponse = serde_json::from_str(&json)
+        .expect("Error parsing JSON");
+
+    status_response
 }
 
 pub async fn respond_legacy_status(client_writer: &mut OwnedWriteHalf) {

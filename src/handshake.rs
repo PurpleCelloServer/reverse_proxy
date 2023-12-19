@@ -1,7 +1,6 @@
 // Yeahbut December 2023
 
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::mc_types;
 
@@ -12,33 +11,33 @@ pub struct Handshake {
     pub next_state: i32,
 }
 
-pub async fn read_handshake(stream: &mut OwnedReadHalf) -> Option<Handshake> {
-    Some(Handshake {
-        protocol_version: mc_types::read_var_int(stream)
-            .await,
-        server_address: mc_types::read_string(stream)
-            .await,
-        server_port: stream.read_u16()
-            .await.expect("Error reading from stream"),
-        next_state: mc_types::read_var_int(stream)
-            .await,
-    })
+pub async fn read_handshake(stream: &mut OwnedReadHalf) -> Handshake {
+    get_handshake(&mut mc_types::read_packet(stream).await)
+}
+
+pub fn get_handshake(data: &mut Vec<u8>) -> Handshake {
+    mc_types::get_var_int(data);
+    Handshake {
+        protocol_version: mc_types::get_var_int(data),
+        server_address: mc_types::get_string(data),
+        server_port: mc_types::get_u16(data),
+        next_state: mc_types::get_var_int(data),
+    }
+}
+
+pub fn convert_handshake(handshake: Handshake) -> Vec<u8> {
+    let mut data: Vec<u8> = vec![0];
+    data.append(&mut mc_types::convert_var_int(handshake.protocol_version));
+    data.append(&mut mc_types::convert_string(&handshake.server_address));
+    data.append(&mut mc_types::convert_u16(handshake.server_port));
+    data.append(&mut mc_types::convert_var_int(handshake.next_state));
+
+    data
 }
 
 pub async fn write_handshake(
     stream: &mut OwnedWriteHalf,
     handshake: Handshake,
 ) {
-    let mut data: Vec<u8> = vec![0];
-    mc_types::write_var_int_bytes(&mut data, handshake.protocol_version);
-    mc_types::write_string_bytes(&mut data, &handshake.server_address);
-    data.append(&mut vec![
-        ((handshake.server_port & 0xFF00) >> 8) as u8,
-        (handshake.server_port & 0xFF) as u8,
-    ]);
-    mc_types::write_var_int_bytes(&mut data, handshake.next_state);
-
-    mc_types::write_var_int(stream, data.len() as i32).await;
-    stream.write_all(&mut data)
-        .await.expect("Error writing to stream");
+    mc_types::write_packet(stream, &mut convert_handshake(handshake)).await;
 }
