@@ -1,12 +1,14 @@
 // Yeahbut December 2023
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
 
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::AsyncWriteExt;
 use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use base64::{Engine as _, engine::general_purpose};
+use rand::Rng;
 
 use crate::mc_types;
 use crate::handshake;
@@ -52,7 +54,42 @@ async fn online_players(
 }
 
 fn motd() -> String {
-    "A Minecraft Server Proxy".to_string()
+    let default = "A Minecraft Server Proxy".to_string();
+    let file_path = "./motd.json";
+
+    let data = match fs::read_to_string(file_path) {
+        Ok(data) => data,
+        Err(_) => return default,
+    };
+
+    let motd_data: Value = match serde_json::from_str(&data) {
+        Ok(value) => value,
+        Err(_) => return default,
+    };
+
+    let length1 = motd_data["line1"].as_array().map_or(0, |v| v.len());
+    let length2 = motd_data["line2"].as_array().map_or(0, |v| v.len());
+
+    if length1 == 0 || length2 == 0 {
+        return default;
+    }
+
+    let mut rng = rand::thread_rng();
+    let rand1 = rng.gen_range(0..length1) as usize;
+    let rand2 = rng.gen_range(0..length2) as usize;
+
+    let line1: &str = match motd_data["line1"][rand1].as_str() {
+        Some(s) => s,
+        None => return default,
+    };
+
+    let line2: &str = match motd_data["line2"][rand2].as_str() {
+        Some(s) => s,
+        None => return default,
+    };
+
+    let line: String = format!("{}\n{}", line1, line2);
+    line
 }
 
 fn favicon() -> Option<String> {
@@ -66,10 +103,11 @@ fn favicon() -> Option<String> {
     let mut buffer = Vec::new();
     if let Err(_) = file.read_to_end(&mut buffer) {
         return None
-    }
+    };
 
     let base64_string = general_purpose::STANDARD_NO_PAD.encode(buffer);
-    let full_string = "data:image/png;base64,".to_string() + &base64_string;
+    let full_string: String =
+        format!("data:image/png;base64,{}", base64_string);
 
     Some(full_string)
 }

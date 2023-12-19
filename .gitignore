@@ -2,3 +2,4 @@
 Cargo.lock
 test_server/*
 main_icon.png
+motd.json
