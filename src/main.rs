@@ -51,7 +51,12 @@ async fn handle_client(client_socket: TcpStream) {
                 ).await;
                 return;
             } else if handshake_packet.next_state == 2 {
-
+                handshake::write_handshake(&mut server_writer, handshake::Handshake{
+                    protocol_version: mc_types::VERSION_PROTOCOL,
+                    server_address: "localhost".to_string(),
+                    server_port: 25565,
+                    next_state: 2,
+                }).await;
             } else {
                 return;
             }
