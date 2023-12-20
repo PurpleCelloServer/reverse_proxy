@@ -117,8 +117,8 @@ fn favicon() -> Option<String> {
 pub async fn respond_status(
     client_reader: &mut OwnedReadHalf,
     client_writer: &mut OwnedWriteHalf,
-    server_reader: &mut OwnedReadHalf,
-    server_writer: &mut OwnedWriteHalf,
+    server_reader: &mut Option<OwnedReadHalf>,
+    server_writer: &mut Option<OwnedWriteHalf>,
 )-> Result<()> {
     loop {
         println!("Status Handling");
@@ -129,26 +129,59 @@ pub async fn respond_status(
 
         if packet_id == 0x00 {
             println!("Handling Status");
-            let online_players =
-                online_players(server_reader, server_writer).await?;
-            let status_response = StatusResponseData {
-                version: StatusVersion {
-                    name: mc_types::VERSION_NAME.to_string(),
-                    protocol: mc_types::VERSION_PROTOCOL,
+            let favicon = favicon();
+
+            let online_players = match server_reader {
+                Some(server_reader) => match server_writer {
+                    Some(server_writer) => match online_players(
+                        server_reader,
+                        server_writer,
+                    ).await {
+                        Ok(value) => Some(value),
+                        Err(_) => None,
+                    },
+                    None => None,
                 },
-                description: mc_types::Chat {
-                    text: motd(),
-                },
-                players: StatusPlayers {
-                    max: -13,
-                    online: online_players.online,
-                    sample: online_players.sample,
-                },
-                favicon: favicon(),
-                enforcesSecureChat: None,
-                previewsChat: None,
-                // enforcesSecureChat: Some(false),
-                // previewsChat: Some(false),
+                None => None,
+            };
+
+            let status_response =
+                match online_players {
+                    Some(online_players) => StatusResponseData {
+                        version: StatusVersion {
+                            name: mc_types::VERSION_NAME.to_string(),
+                            protocol: mc_types::VERSION_PROTOCOL,
+                        },
+                        description: mc_types::Chat {
+                            text: motd(),
+                        },
+                        players: StatusPlayers {
+                            max: -13,
+                            online: online_players.online,
+                            sample: online_players.sample,
+                        },
+                        favicon: favicon,
+                        enforcesSecureChat: Some(false),
+                        previewsChat: Some(false),
+                    },
+                    None => StatusResponseData {
+                        version: StatusVersion {
+                            name: "Old".to_string(),
+                            protocol: 0,
+                        },
+                        description: mc_types::Chat {
+                            text: "Server Error (Server may be starting)"
+                                .to_string() + "\nPurple Cello Server",
+                        },
+                        players: StatusPlayers {
+                            max: 0,
+                            online: 0,
+                            sample: None,
+                        },
+                        favicon: favicon,
+                        enforcesSecureChat: Some(false),
+                        previewsChat: Some(false),
+                    },
             };
 
             let json = serde_json::to_string(&status_response)?;

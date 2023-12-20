@@ -1,6 +1,6 @@
 // Yeahbut December 2023
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io;
 use std::error::Error;
 
@@ -27,10 +27,21 @@ async fn handle_client(client_socket: TcpStream) {
 
     let (mut client_reader, mut client_writer) = client_socket.into_split();
 
-    let backend_socket = TcpStream::connect(backend_addr)
-        .await.expect("Failed to connect to the backend server");
+    // "Failed to connect to the backend server"
 
-    let (mut server_reader, mut server_writer) = backend_socket.into_split();
+    let backend_socket = match TcpStream::connect(backend_addr).await {
+        Ok(backend_socket) => Some(backend_socket.into_split()),
+        Err(_) => None,
+    };
+
+    let (mut server_reader, mut server_writer):
+        (Option<OwnedReadHalf>, Option<OwnedWriteHalf>) =
+            match backend_socket {
+                Some(backend_socket) =>
+                    (Some(backend_socket.0), Some(backend_socket.1)),
+                None => (None, None),
+    };
+
     let mut buffer: [u8; 1] = [0; 1];
     client_reader.peek(&mut buffer)
         .await.expect("Failed to peek at first byte from stream");
@@ -54,28 +65,45 @@ async fn handle_client(client_socket: TcpStream) {
             ).await.expect("Error handling status request");
             return;
         } else if handshake_packet.next_state == 2 {
-            handshake::write_handshake(&mut server_writer, handshake::Handshake{
-                protocol_version: mc_types::VERSION_PROTOCOL,
-                server_address: "localhost".to_string(),
-                server_port: 25565,
-                next_state: 2,
-            }).await.expect("Error logging into backend server");
+            match server_writer {
+                Some(mut server_writer) => {
+                    handshake::write_handshake(
+                        &mut server_writer,
+                        handshake::Handshake {
+                            protocol_version: mc_types::VERSION_PROTOCOL,
+                            server_address: "localhost".to_string(),
+                            server_port: 25565,
+                            next_state: 2,
+                        },
+                    ).await.expect("Error logging into backend server");
+
+                    // Forward from client to backend
+                    tokio::spawn(async move {
+                        io::copy(&mut client_reader, &mut server_writer).await
+                            .expect("Error copying from client to backend");
+                    });
+
+                    // Forward from backend to client
+                    match server_reader {
+                        Some(mut server_reader) => tokio::spawn(async move {
+                            io::copy(&mut server_reader, &mut client_writer)
+                                .await
+                                .expect("Error copying from backend to client");
+                        }),
+                        None => {
+                            eprintln!(
+                                "Failed to connect to the backend server");
+                            return;
+                        }
+                    };
+                },
+                None => {}
+            };
         } else {
             return;
         }
     }
 
-    // Forward from client to backend
-    tokio::spawn(async move {
-        io::copy(&mut client_reader, &mut server_writer)
-            .await.expect("Error copying from client to backend");
-    });
-
-    // Forward from backend to client
-    tokio::spawn(async move {
-        io::copy(&mut server_reader, &mut client_writer)
-            .await.expect("Error copying from backend to client");
-    });
 
     println!("Connection Closed");
 }
