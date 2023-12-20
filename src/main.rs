@@ -97,7 +97,13 @@ async fn handle_client(client_socket: TcpStream) {
                         }
                     };
                 },
-                None => {}
+                None => {
+                    login::write_clientbound_disconnect(
+                        &mut client_writer,
+                        "\"Server Error (Server may be starting)\"".to_string(),
+                    ).await.expect("Error sending disconnect on: \
+Failed to connect to the backend server");
+                }
             };
         } else {
             return;
