@@ -1,8 +1,13 @@
 // Yeahbut December 2023
 
+use std::error::Error;
+use std::fmt;
+
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Serialize, Deserialize};
+
+pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const VERSION_NAME: &str = "1.19.4";
 pub const VERSION_PROTOCOL: i32 = 762;
@@ -10,30 +15,54 @@ pub const VERSION_PROTOCOL: i32 = 762;
 const SEGMENT_BITS: u8 = 0x7F;
 const CONTINUE_BIT: u8 = 0x80;
 
+#[derive(Debug)]
+pub enum VarIntError {
+    ValueTooLarge,
+    RanOutOfBytes,
+}
+
+impl fmt::Display for VarIntError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VarIntError::ValueTooLarge =>
+                write!(f, "VarInt value is too large"),
+            VarIntError::RanOutOfBytes =>
+                write!(f, "Ran out of bytes while reading VarInt"),
+        }
+    }
+}
+
+impl Error for VarIntError {}
+
 #[derive(Serialize, Deserialize)]
 pub struct Chat {
     pub text: String,
 }
 
-pub async fn read_packet(stream: &mut OwnedReadHalf) -> Vec<u8> {
-    let length = read_var_int_stream(stream).await;
-    let mut buffer: Vec<u8> = vec![0; length as usize];
-    stream.read_exact(&mut buffer)
-        .await.expect("Error reading string from stream");
-    buffer
+pub async fn read_packet(stream: &mut OwnedReadHalf) -> Result<Vec<u8>> {
+    let length = read_var_int_stream(stream).await? as usize;
+
+    let mut buffer: Vec<u8> = vec![0; length];
+    stream.read_exact(&mut buffer).await?;
+
+    Ok(buffer)
 }
-pub async fn write_packet(stream: &mut OwnedWriteHalf, data: &mut Vec<u8>) {
+pub async fn write_packet(
+    stream: &mut OwnedWriteHalf,
+    data: &mut Vec<u8>,
+) -> Result<()> {
     let mut out_data = convert_var_int(data.len() as i32);
     out_data.append(data);
-    stream.write_all(&out_data)
-        .await.expect("Error writing to stream");
+
+    stream.write_all(&out_data).await?;
+
+    Ok(())
 }
-async fn read_var_int_stream(stream: &mut OwnedReadHalf) -> i32 {
+async fn read_var_int_stream(stream: &mut OwnedReadHalf) -> Result<i32> {
     let mut data: Vec<u8> = vec![];
 
     loop {
-        let current_byte = stream.read_u8()
-            .await.expect("Error reading from stream");
+        let current_byte = stream.read_u8().await?;
 
         data.append(&mut vec![current_byte]);
 
@@ -42,7 +71,9 @@ async fn read_var_int_stream(stream: &mut OwnedReadHalf) -> i32 {
         }
     }
 
-    get_var_int(&mut data)
+    let varint = get_var_int(&mut data)?;
+
+    Ok(varint)
 }
 
 pub fn get_bool(data: &mut Vec<u8>) -> bool {
@@ -150,13 +181,31 @@ pub fn convert_f64(value: f64) -> Vec<u8> {
     convert_u64(value as u64)
 }
 
-pub fn get_var_int(data: &mut Vec<u8>) -> i32 {
-    let mut value: i32 = 0;
-    let mut position: u32 = 0;
+pub fn get_var_int(data: &mut Vec<u8>) -> Result<i32> {
+    Ok(get_var(data, 32)? as i32)
+}
+pub fn convert_var_int(value: i32) -> Vec<u8> {
+    convert_var(value as i64)
+}
+
+pub fn get_var_long(data: &mut Vec<u8>) -> Result<i64> {
+    get_var(data, 64)
+}
+pub fn convert_var_long(value: i64) -> Vec<u8> {
+    convert_var(value)
+}
+
+fn get_var(data: &mut Vec<u8>, size: u8) -> Result<i64> {
+    let mut value: i64 = 0;
+    let mut position: u8 = 0;
 
     loop {
+        if data.is_empty() {
+            return Err(Box::new(VarIntError::RanOutOfBytes));
+        }
+
         let current_byte = data.remove(0);
-        value |= ((current_byte & SEGMENT_BITS) as i32) << position;
+        value |= ((current_byte & SEGMENT_BITS) as i64) << position;
 
         if (current_byte & CONTINUE_BIT) == 0 {
             break;
@@ -164,31 +213,31 @@ pub fn get_var_int(data: &mut Vec<u8>) -> i32 {
 
         position += 7;
 
-        if position >= 32 {
-            eprintln!("VarInt is too big");
+        if position >= size {
+            return Err(Box::new(VarIntError::ValueTooLarge));
         }
     }
 
-    value
+    Ok(value)
 }
-pub fn convert_var_int(mut value: i32) -> Vec<u8> {
+fn convert_var(mut value: i64) -> Vec<u8> {
     let mut data: Vec<u8> = vec![];
     loop {
-        if (value & !(SEGMENT_BITS as i32)) == 0 {
+        if (value & !(SEGMENT_BITS as i64)) == 0 {
             data.append(&mut vec![value as u8]);
             return data;
         }
         data.append(
-            &mut vec![(value & (SEGMENT_BITS as i32)) as u8 | CONTINUE_BIT]);
+            &mut vec![(value & (SEGMENT_BITS as i64)) as u8 | CONTINUE_BIT]);
         value >>= 7;
     }
 }
 
-pub fn get_string(data: &mut Vec<u8>) -> String {
-    let length = get_var_int(data) as usize;
+pub fn get_string(data: &mut Vec<u8>) -> Result<String> {
+    let length = get_var_int(data)? as usize;
     let buffer = data[..length].to_vec();
     for _ in 0..length { data.remove(0); }
-    String::from_utf8_lossy(&buffer).to_string()
+    Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 pub fn convert_string(s: &str) -> Vec<u8> {
     let length = s.len() as i32;
