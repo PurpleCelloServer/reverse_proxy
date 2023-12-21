@@ -1,45 +1,57 @@
 // Yeahbut December 2023
 
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+pub mod serverbound {
 
-use crate::mc_types::{self, Result};
+    use tokio::net::tcp::OwnedReadHalf;
 
-pub struct Handshake {
-    pub protocol_version: i32,
-    pub server_address: String,
-    pub server_port: u16,
-    pub next_state: i32,
-}
+    use crate::mc_types::{self, Result, Packet, PacketError};
 
-pub async fn read_handshake(stream: &mut OwnedReadHalf) -> Result<Handshake> {
-    let mut data = mc_types::read_packet(stream).await?;
-    let _packet_id = mc_types::get_var_int(&mut data);
-    Ok(get_handshake(&mut data)?)
-}
+    enum HandshakeEnum {
+        Handshake(Handshake),
+    }
 
-pub fn get_handshake(data: &mut Vec<u8>) -> Result<Handshake> {
-    Ok(Handshake {
-        protocol_version: mc_types::get_var_int(data)?,
-        server_address: mc_types::get_string(data)?,
-        server_port: mc_types::get_u16(data),
-        next_state: mc_types::get_var_int(data)?,
-    })
-}
+    impl HandshakeEnum {
+        pub async fn read(stream: &mut OwnedReadHalf) -> Result<Self> {
+            let mut data = mc_types::read_data(stream).await?;
+            let packet_id = mc_types::get_var_int(&mut data)?;
+            if packet_id == Handshake::packet_id() {
+                return Ok(Self::Handshake(Handshake::get(&mut data)?))
+            } else {
+                return Err(Box::new(PacketError::InvalidPacketId))
+            }
+        }
+    }
 
-pub fn convert_handshake(handshake: Handshake) -> Vec<u8> {
-    let mut data: Vec<u8> = vec![0];
-    data.append(&mut mc_types::convert_var_int(handshake.protocol_version));
-    data.append(&mut mc_types::convert_string(&handshake.server_address));
-    data.append(&mut mc_types::convert_u16(handshake.server_port));
-    data.append(&mut mc_types::convert_var_int(handshake.next_state));
+    pub struct Handshake {
+        pub protocol_version: i32,
+        pub server_address: String,
+        pub server_port: u16,
+        pub next_state: i32,
+    }
 
-    data
-}
+    impl Packet for Handshake {
 
-pub async fn write_handshake(
-    stream: &mut OwnedWriteHalf,
-    handshake: Handshake,
-) -> Result<()> {
-    mc_types::write_packet(stream, &mut convert_handshake(handshake)).await?;
-    Ok(())
+        fn packet_id() -> i32 {0}
+
+        fn get(data: &mut Vec<u8>) -> Result<Self> {
+            Ok(Self {
+                protocol_version: mc_types::get_var_int(data)?,
+                server_address: mc_types::get_string(data)?,
+                server_port: mc_types::get_u16(data),
+                next_state: mc_types::get_var_int(data)?,
+            })
+        }
+
+        fn convert(&self) -> Vec<u8> {
+            let mut data: Vec<u8> = vec![];
+            data.append(&mut mc_types::convert_var_int(Self::packet_id()));
+            data.append(&mut mc_types::convert_var_int(self.protocol_version));
+            data.append(&mut mc_types::convert_string(&self.server_address));
+            data.append(&mut mc_types::convert_u16(self.server_port));
+            data.append(&mut mc_types::convert_var_int(self.next_state));
+
+            data
+        }
+
+    }
 }

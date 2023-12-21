@@ -9,6 +9,8 @@ mod handshake;
 mod status;
 mod login;
 
+use mc_types::Packet;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:25565").await?;
@@ -52,8 +54,9 @@ async fn handle_client(client_socket: TcpStream) {
             .await.expect("Error handling legacy status request");
         return;
     } else {
-        let handshake_packet = handshake::read_handshake(&mut client_reader)
-            .await.expect("Error reading handshake packet");
+        let handshake_packet =
+            handshake::serverbound::Handshake::read(&mut client_reader)
+                .await.expect("Error reading handshake packet");
         println!("Next state: {}", handshake_packet.next_state);
         if handshake_packet.next_state == 1 {
             println!("Receiving Status Request");
@@ -67,15 +70,15 @@ async fn handle_client(client_socket: TcpStream) {
         } else if handshake_packet.next_state == 2 {
             match server_writer {
                 Some(mut server_writer) => {
-                    handshake::write_handshake(
-                        &mut server_writer,
-                        handshake::Handshake {
-                            protocol_version: mc_types::VERSION_PROTOCOL,
-                            server_address: "localhost".to_string(),
-                            server_port: 25565,
-                            next_state: 2,
-                        },
-                    ).await.expect("Error logging into backend server");
+                    handshake::serverbound::Handshake {
+                        protocol_version: mc_types::VERSION_PROTOCOL,
+                        server_address: "localhost".to_string(),
+                        server_port: 25565,
+                        next_state: 2,
+                    }
+                        .write(&mut server_writer)
+                        .await
+                        .expect("Error logging into backend server");
 
                     // Forward from client to backend
                     tokio::spawn(async move {
@@ -98,10 +101,13 @@ async fn handle_client(client_socket: TcpStream) {
                     };
                 },
                 None => {
-                    login::write_clientbound_disconnect(
-                        &mut client_writer,
-                        "\"Server Error (Server may be starting)\"".to_string(),
-                    ).await.expect("Error sending disconnect on: \
+                    login::clientbound::Disconnect {
+                        reason: "\"Server Error (Server may be starting)\""
+                            .to_string()
+                    }
+                        .write(&mut client_writer)
+                        .await
+                        .expect("Error sending disconnect on: \
 Failed to connect to the backend server");
                 }
             };

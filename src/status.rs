@@ -10,7 +10,7 @@ use serde_json::Value;
 use base64::{Engine as _, engine::general_purpose};
 use rand::Rng;
 
-use crate::mc_types::{self, Result};
+use crate::mc_types::{self, Result, Packet};
 use crate::handshake;
 
 #[derive(Serialize, Deserialize)]
@@ -122,7 +122,7 @@ pub async fn respond_status(
 )-> Result<()> {
     loop {
         println!("Status Handling");
-        let mut data = mc_types::read_packet(client_reader).await?;
+        let mut data = mc_types::read_data(client_reader).await?;
         let packet_id = mc_types::get_var_int(&mut data)?;
 
         println!("Status Packet ID: {}", packet_id);
@@ -188,12 +188,12 @@ pub async fn respond_status(
 
             let mut out_data: Vec<u8> = vec![0];
             out_data.append(&mut mc_types::convert_string(&json));
-            mc_types::write_packet(client_writer, &mut out_data).await?;
+            mc_types::write_data(client_writer, &mut out_data).await?;
         } else if packet_id == 0x01 {
             println!("Handling Ping");
             let mut out_data: Vec<u8> = vec![1];
             out_data.append(&mut data);
-            mc_types::write_packet(client_writer, &mut out_data).await?;
+            mc_types::write_data(client_writer, &mut out_data).await?;
             break;
         } else {
             break;
@@ -206,14 +206,14 @@ pub async fn get_upstream_status(
     server_reader: &mut OwnedReadHalf,
     server_writer: &mut OwnedWriteHalf,
 ) -> Result<StatusResponseData> {
-    handshake::write_handshake(server_writer, handshake::Handshake{
+    handshake::serverbound::Handshake{
         protocol_version: mc_types::VERSION_PROTOCOL,
         server_address: "localhost".to_string(),
         server_port: 25565,
         next_state: 1,
-    }).await?;
-    mc_types::write_packet(server_writer, &mut vec![0]).await?;
-    let mut data = mc_types::read_packet(server_reader).await?;
+    }.write(server_writer).await?;
+    mc_types::write_data(server_writer, &mut vec![0]).await?;
+    let mut data = mc_types::read_data(server_reader).await?;
 
     mc_types::get_u8(&mut data);
     let json = mc_types::get_string(&mut data)?;

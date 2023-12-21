@@ -6,6 +6,7 @@ use std::fmt;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Serialize, Deserialize};
+use async_trait::async_trait;
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -14,6 +15,22 @@ pub const VERSION_PROTOCOL: i32 = 762;
 
 const SEGMENT_BITS: u8 = 0x7F;
 const CONTINUE_BIT: u8 = 0x80;
+
+#[derive(Debug)]
+pub enum PacketError {
+    InvalidPacketId,
+}
+
+impl fmt::Display for PacketError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PacketError::InvalidPacketId =>
+                write!(f, "Invalid packet id"),
+        }
+    }
+}
+
+impl Error for PacketError {}
 
 #[derive(Debug)]
 pub enum VarIntError {
@@ -39,7 +56,29 @@ pub struct Chat {
     pub text: String,
 }
 
-pub async fn read_packet(stream: &mut OwnedReadHalf) -> Result<Vec<u8>> {
+
+#[async_trait]
+pub trait Packet: Sized {
+    fn packet_id() -> i32;
+    fn get(data: &mut Vec<u8>) -> Result<Self>;
+    fn convert(&self) -> Vec<u8>;
+
+    async fn read(stream: &mut OwnedReadHalf) -> Result<Self> {
+        let mut data = read_data(stream).await?;
+        let packet_id = get_var_int(&mut data)?;
+        if packet_id == Self::packet_id() {
+            return Ok(Self::get(&mut data)?)
+        } else {
+            return Err(Box::new(PacketError::InvalidPacketId))
+        }
+    }
+
+    async fn write(&self, stream: &mut OwnedWriteHalf) -> Result<()> {
+        write_data(stream, &mut self.convert()).await
+    }
+}
+
+pub async fn read_data(stream: &mut OwnedReadHalf) -> Result<Vec<u8>> {
     let length = read_var_int_stream(stream).await? as usize;
 
     let mut buffer: Vec<u8> = vec![0; length];
@@ -47,7 +86,7 @@ pub async fn read_packet(stream: &mut OwnedReadHalf) -> Result<Vec<u8>> {
 
     Ok(buffer)
 }
-pub async fn write_packet(
+pub async fn write_data(
     stream: &mut OwnedWriteHalf,
     data: &mut Vec<u8>,
 ) -> Result<()> {
