@@ -8,6 +8,7 @@ mod mc_types;
 mod handshake;
 mod status;
 mod login;
+mod status_handle;
 
 use mc_types::Packet;
 
@@ -50,7 +51,7 @@ async fn handle_client(client_socket: TcpStream) {
     let packet_id: u8 = buffer[0];
 
     if packet_id == 0xFE {
-        status::respond_legacy_status(&mut client_writer)
+        status_handle::respond_legacy_status(&mut client_writer)
             .await.expect("Error handling legacy status request");
         return;
     } else {
@@ -60,7 +61,7 @@ async fn handle_client(client_socket: TcpStream) {
         println!("Next state: {}", handshake_packet.next_state);
         if handshake_packet.next_state == 1 {
             println!("Receiving Status Request");
-            status::respond_status(
+            status_handle::respond_status(
                 &mut client_reader,
                 &mut client_writer,
                 &mut server_reader,
