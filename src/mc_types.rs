@@ -18,12 +18,18 @@ const CONTINUE_BIT: u8 = 0x80;
 
 #[derive(Debug)]
 pub enum PacketError {
+    ValueTooLarge,
+    RanOutOfBytes,
     InvalidPacketId,
 }
 
 impl fmt::Display for PacketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            PacketError::ValueTooLarge =>
+                write!(f, "VarInt value is too large"),
+            PacketError::RanOutOfBytes =>
+                write!(f, "Ran out of bytes while reading VarInt"),
             PacketError::InvalidPacketId =>
                 write!(f, "Invalid packet id"),
         }
@@ -31,25 +37,6 @@ impl fmt::Display for PacketError {
 }
 
 impl Error for PacketError {}
-
-#[derive(Debug)]
-pub enum VarIntError {
-    ValueTooLarge,
-    RanOutOfBytes,
-}
-
-impl fmt::Display for VarIntError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VarIntError::ValueTooLarge =>
-                write!(f, "VarInt value is too large"),
-            VarIntError::RanOutOfBytes =>
-                write!(f, "Ran out of bytes while reading VarInt"),
-        }
-    }
-}
-
-impl Error for VarIntError {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Chat {
@@ -112,6 +99,29 @@ async fn read_var_int_stream(stream: &mut OwnedReadHalf) -> Result<i32> {
     let varint = get_var_int(&mut data)?;
 
     Ok(varint)
+}
+
+pub trait PacketArray: Sized {
+    fn get(data: &mut Vec<u8>) -> Result<Self>;
+    fn convert(&self) -> Vec<u8>;
+
+    fn get_array(data: &mut Vec<u8>) -> Result<Vec<Self>> {
+        let length = get_var_int(data)?;
+        let mut out_data: Vec<Self> = vec![];
+        for _ in 0..length {
+            out_data.push(Self::get(data)?);
+        }
+        Ok(out_data)
+    }
+
+    fn convert_array(array: &mut Vec<Self>) -> Vec<u8> {
+        let length = array.len() as i32;
+        let mut data: Vec<u8> = convert_var_int(length);
+        for element in array {
+            data.append(&mut Self::convert(element));
+        }
+        data
+    }
 }
 
 pub fn get_bool(data: &mut Vec<u8>) -> bool {
@@ -219,6 +229,45 @@ pub fn convert_f64(value: f64) -> Vec<u8> {
     convert_u64(value as u64)
 }
 
+pub fn get_uuid(data: &mut Vec<u8>) -> u128 {
+    ((data.remove(0) as u128) << 120) |
+    ((data.remove(0) as u128) << 112) |
+    ((data.remove(0) as u128) << 104) |
+    ((data.remove(0) as u128) << 96) |
+    ((data.remove(0) as u128) << 88) |
+    ((data.remove(0) as u128) << 80) |
+    ((data.remove(0) as u128) << 72) |
+    ((data.remove(0) as u128) << 64) |
+    ((data.remove(0) as u128) << 56) |
+    ((data.remove(0) as u128) << 48) |
+    ((data.remove(0) as u128) << 40) |
+    ((data.remove(0) as u128) << 32) |
+    ((data.remove(0) as u128) << 24) |
+    ((data.remove(0) as u128) << 16) |
+    ((data.remove(0) as u128) << 8) |
+    (data.remove(0) as u128)
+}
+pub fn convert_uuid(value: u128) -> Vec<u8> {
+    vec![
+        ((value & 0xFF000000000000000000000000000000) >> 120) as u8,
+        ((value & 0xFF0000000000000000000000000000) >> 112) as u8,
+        ((value & 0xFF00000000000000000000000000) >> 104) as u8,
+        ((value & 0xFF000000000000000000000000) >> 96) as u8,
+        ((value & 0xFF0000000000000000000000) >> 88) as u8,
+        ((value & 0xFF00000000000000000000) >> 80) as u8,
+        ((value & 0xFF000000000000000000) >> 72) as u8,
+        ((value & 0xFF0000000000000000) >> 64) as u8,
+        ((value & 0xFF00000000000000) >> 56) as u8,
+        ((value & 0xFF000000000000) >> 48) as u8,
+        ((value & 0xFF0000000000) >> 40) as u8,
+        ((value & 0xFF00000000) >> 32) as u8,
+        ((value & 0xFF000000) >> 24) as u8,
+        ((value & 0xFF0000) >> 16) as u8,
+        ((value & 0xFF00) >> 8) as u8,
+        (value & 0xFF) as u8,
+    ]
+}
+
 pub fn get_var_int(data: &mut Vec<u8>) -> Result<i32> {
     Ok(get_var(data, 32)? as i32)
 }
@@ -239,7 +288,7 @@ fn get_var(data: &mut Vec<u8>, size: u8) -> Result<i64> {
 
     loop {
         if data.is_empty() {
-            return Err(Box::new(VarIntError::RanOutOfBytes));
+            return Err(Box::new(PacketError::RanOutOfBytes));
         }
 
         let current_byte = data.remove(0);
@@ -252,7 +301,7 @@ fn get_var(data: &mut Vec<u8>, size: u8) -> Result<i64> {
         position += 7;
 
         if position >= size {
-            return Err(Box::new(VarIntError::ValueTooLarge));
+            return Err(Box::new(PacketError::ValueTooLarge));
         }
     }
 
@@ -281,5 +330,18 @@ pub fn convert_string(s: &str) -> Vec<u8> {
     let length = s.len() as i32;
     let mut data = convert_var_int(length);
     data.append(&mut s.as_bytes().to_vec());
+    data
+}
+
+pub fn get_byte_array(data: &mut Vec<u8>) -> Result<Vec<u8>> {
+    let length = get_var_int(data)? as usize;
+    let buffer = data[..length].to_vec();
+    for _ in 0..length { data.remove(0); }
+    Ok(buffer)
+}
+pub fn convert_byte_array(mut s: &mut Vec<u8>) -> Vec<u8> {
+    let length = s.len() as i32;
+    let mut data = convert_var_int(length);
+    data.append(&mut s);
     data
 }
