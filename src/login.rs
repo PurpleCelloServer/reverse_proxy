@@ -6,7 +6,7 @@ pub mod clientbound {
 
     use crate::mc_types::{self, Result, Packet, PacketError};
 
-    enum Login {
+    pub enum Login {
         Disconnect(Disconnect),
     }
 

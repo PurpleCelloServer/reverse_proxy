@@ -56,7 +56,6 @@ pub struct Chat {
     pub text: String,
 }
 
-
 #[async_trait]
 pub trait Packet: Sized {
     fn packet_id() -> i32;

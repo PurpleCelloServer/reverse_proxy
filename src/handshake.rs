@@ -6,7 +6,7 @@ pub mod serverbound {
 
     use crate::mc_types::{self, Result, Packet, PacketError};
 
-    enum HandshakeEnum {
+    pub enum HandshakeEnum {
         Handshake(Handshake),
     }
 
