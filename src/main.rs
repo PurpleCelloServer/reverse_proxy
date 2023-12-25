@@ -5,7 +5,7 @@ use tokio::io;
 use std::error::Error;
 
 use purple_cello_mc_protocol::{
-    mc_types::Packet,
+    mc_types::{self, Packet},
     handshake,
     login,
 };
@@ -71,45 +71,72 @@ async fn handle_client(client_socket: TcpStream) {
             ).await.expect("Error handling status request");
             return;
         } else if handshake_packet.next_state == 2 {
-            match server_writer {
-                Some(mut server_writer) => {
-                    match server_reader {
-                        Some(mut server_reader) => {
+            if handshake_packet.protocol_version == mc_types::VERSION_PROTOCOL {
+                match server_writer {
+                    Some(mut server_writer) => {
+                        match server_reader {
+                            Some(mut server_reader) => {
 
-                            if login_handle::respond_login(
-                                &mut client_reader,
-                                &mut client_writer,
-                                &mut server_reader,
-                                &mut server_writer,
-                            )
-                                .await
-                                .expect("Error logging into backend server") {
+                                if login_handle::respond_login(
+                                    &mut client_reader,
+                                    &mut client_writer,
+                                    &mut server_reader,
+                                    &mut server_writer,
+                                ).await.expect(
+                                    "Error logging into proxy or server"
+                                ) {
                                     handle_play(
                                         client_reader,
                                         client_writer,
                                         server_reader,
                                         server_writer,
                                     ).await;
+                                } else {
+                                    println!("Player blocked from server");
                                 }
-                        },
-                        None => {
-                            eprintln!(
-                                "Failed to connect to the backend server");
-                            return;
+                            },
+                            None => {
+                                eprintln!(
+                                    "Failed to connect to the backend server");
+                                return;
+                            }
+                        };
+                    },
+                    None => {
+                        login::clientbound::Disconnect {
+                            reason: "\"Server Error (Server may be starting)\""
+                                .to_string()
                         }
-                    };
-                },
-                None => {
-                    login::clientbound::Disconnect {
-                        reason: "\"Server Error (Server may be starting)\""
-                            .to_string()
-                    }
-                        .write(&mut client_writer)
-                        .await
-                        .expect("Error sending disconnect on: \
+                            .write(&mut client_writer)
+                            .await
+                            .expect("Error sending disconnect on: \
 Failed to connect to the backend server");
+                    }
+                };
+            }
+            else
+            if handshake_packet.protocol_version < mc_types::VERSION_PROTOCOL {
+                println!("Client on outdated version");
+                login::clientbound::Disconnect {
+                    reason: format!(
+                        "\"Client Error: Outdated Version (I'm on {})\"",
+                        mc_types::VERSION_NAME,
+                    ).to_string()
                 }
-            };
+                    .write(&mut client_writer).await.expect(
+                        "Error sending disconnect on: Client on wrong version");
+            // if handshake_packet.protocol_version > mc_types::VERSION_PROTOCOL
+            } else {
+                println!("Client on future version");
+                login::clientbound::Disconnect {
+                    reason: format!(
+                        "\"Client Error: Future Version (I'm on {})\"",
+                        mc_types::VERSION_NAME,
+                    ).to_string()
+                }
+                    .write(&mut client_writer).await.expect(
+                        "Error sending disconnect on: Client on wrong version");
+            }
         } else {
             return;
         }
