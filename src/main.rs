@@ -4,13 +4,14 @@ use tokio::net::{TcpListener, TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io;
 use std::error::Error;
 
-mod mc_types;
-mod handshake;
-mod status;
-mod login;
+use purple_cello_mc_protocol::{
+    mc_types::{self, Packet},
+    handshake,
+    login,
+};
+
 mod status_handle;
 
-use mc_types::Packet;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

@@ -9,9 +9,11 @@ use serde_json::Value;
 use base64::{Engine as _, engine::general_purpose};
 use rand::Rng;
 
-use crate::mc_types::{self, Result, Packet};
-use crate::status;
-use crate::handshake;
+use purple_cello_mc_protocol::{
+    mc_types::{self, Result, Packet},
+    handshake,
+    status,
+};
 
 async fn online_players(
     server_reader: &mut OwnedReadHalf,
@@ -177,13 +179,17 @@ pub async fn get_upstream_status(
         server_port: 25565,
         next_state: 1,
     }.write(server_writer).await?;
-    mc_types::write_data(server_writer, &mut vec![0]).await?;
-    let mut data = mc_types::read_data(server_reader).await?;
+    status::serverbound::Status{}.write(server_writer).await?;
+    let packet = status::clientbound::Status::read(server_reader).await?;
+    let status_response = packet.get_json()?;
 
-    mc_types::get_u8(&mut data);
-    let json = mc_types::get_string(&mut data)?;
-    let status_response: status::clientbound::StatusResponseData =
-        serde_json::from_str(&json)?;
+    // mc_types::write_data(server_writer, &mut vec![0]).await?;
+    // let mut data = mc_types::read_data(server_reader).await?;
+
+    // mc_types::get_u8(&mut data);
+    // let json = mc_types::get_string(&mut data)?;
+    // let status_response: status::clientbound::StatusResponseData =
+    //     serde_json::from_str(&json)?;
 
     // let mut out_data: Vec<u8> = vec![1];
     // out_data.append(&mut mc_types::convert_i64(0));
