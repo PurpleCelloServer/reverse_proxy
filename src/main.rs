@@ -5,12 +5,13 @@ use tokio::io;
 use std::error::Error;
 
 use purple_cello_mc_protocol::{
-    mc_types::{self, Packet},
+    mc_types::Packet,
     handshake,
     login,
 };
 
 mod status_handle;
+mod login_handle;
 
 
 #[tokio::main]
@@ -72,29 +73,25 @@ async fn handle_client(client_socket: TcpStream) {
         } else if handshake_packet.next_state == 2 {
             match server_writer {
                 Some(mut server_writer) => {
-                    handshake::serverbound::Handshake {
-                        protocol_version: mc_types::VERSION_PROTOCOL,
-                        server_address: "localhost".to_string(),
-                        server_port: 25565,
-                        next_state: 2,
-                    }
-                        .write(&mut server_writer)
-                        .await
-                        .expect("Error logging into backend server");
-
-                    // Forward from client to backend
-                    tokio::spawn(async move {
-                        io::copy(&mut client_reader, &mut server_writer).await
-                            .expect("Error copying from client to backend");
-                    });
-
-                    // Forward from backend to client
                     match server_reader {
-                        Some(mut server_reader) => tokio::spawn(async move {
-                            io::copy(&mut server_reader, &mut client_writer)
+                        Some(mut server_reader) => {
+
+                            if login_handle::respond_login(
+                                &mut client_reader,
+                                &mut client_writer,
+                                &mut server_reader,
+                                &mut server_writer,
+                            )
                                 .await
-                                .expect("Error copying from backend to client");
-                        }),
+                                .expect("Error logging into backend server") {
+                                    handle_play(
+                                        client_reader,
+                                        client_writer,
+                                        server_reader,
+                                        server_writer,
+                                    ).await;
+                                }
+                        },
                         None => {
                             eprintln!(
                                 "Failed to connect to the backend server");
@@ -120,4 +117,29 @@ Failed to connect to the backend server");
 
 
     println!("Connection Closed");
+}
+
+async fn handle_play(
+    mut client_reader: OwnedReadHalf,
+    mut client_writer: OwnedWriteHalf,
+    mut server_reader: OwnedReadHalf,
+    mut server_writer: OwnedWriteHalf,
+) {
+    // Forward from client to backend
+    tokio::spawn(async move {
+        io::copy(
+            &mut client_reader,
+            &mut server_writer,
+        ).await.expect(
+            "Error copying from client to backend");
+    });
+
+    // Forward from backend to client
+    tokio::spawn(async move {
+    io::copy(
+        &mut server_reader,
+        &mut client_writer,
+    ).await.expect(
+        "Error copying from backend to client");
+    });
 }
