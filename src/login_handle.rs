@@ -13,8 +13,23 @@ struct Player {
     player_uuid: Option<u128>,
 }
 
-fn check_player(player: &Player) -> Result<bool> {
-    Ok(true)
+enum PlayerAllowed {
+    True(Player),
+    False(String),
+}
+
+fn check_player(player: Player) -> Result<PlayerAllowed> {
+    static mut PARITY: bool = true;
+    let parity: bool;
+    unsafe {
+        parity = PARITY;
+        PARITY = !PARITY;
+    }
+    if parity { //player.name.to_lowercase() == "yeahbut" {
+        Ok(PlayerAllowed::True(player))
+    } else {
+        Ok(PlayerAllowed::False("Testing blocking, try again.".to_string()))
+    }
 }
 
 pub async fn respond_login(
@@ -25,7 +40,8 @@ pub async fn respond_login(
 ) -> Result<bool> {
     let proxy_login = login_to_proxy(client_reader).await?;
     match proxy_login {
-        Some(player) => {
+        PlayerAllowed::True(player) => {
+            println!("Player allowed");
             login_to_backend(
                 player,
                 client_writer,
@@ -34,13 +50,19 @@ pub async fn respond_login(
             ).await?;
             return Ok(true)
         },
-        None => return Ok(false)
+        PlayerAllowed::False(msg) => {
+            println!("Player blocked: {}", msg);
+            login::clientbound::Disconnect {
+                reason: format!("{{\"text\":\"{}\"}}", msg.to_string())
+            }.write(client_writer).await?;
+            return Ok(false)
+        }
     }
 }
 
 async fn login_to_proxy(
     client_reader: &mut OwnedReadHalf,
-) -> Result<Option<Player>> {
+) -> Result<PlayerAllowed> {
     println!("Logging into proxy");
 
     let start_packet =
@@ -51,13 +73,7 @@ async fn login_to_proxy(
         player_uuid: start_packet.player_uuid,
     };
 
-    if check_player(&player)? {
-        println!("Player allowed");
-        Ok(Some(player))
-    } else {
-        println!("Player blocked");
-        Ok(None)
-    }
+    check_player(player)
 }
 
 async fn login_to_backend(
