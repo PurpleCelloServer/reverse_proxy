@@ -1,5 +1,6 @@
 // Yeahbut December 2023
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use purple_cello_mc_protocol::{
@@ -19,13 +20,12 @@ enum PlayerAllowed {
 }
 
 fn check_player(player: Player) -> Result<PlayerAllowed> {
-    static mut PARITY: bool = true;
+    static PARITY: AtomicBool = AtomicBool::new(true);
     let parity: bool;
-    unsafe {
-        parity = PARITY;
-        PARITY = !PARITY;
-    }
-    if parity { //player.name.to_lowercase() == "yeahbut" {
+    parity = PARITY.load(Ordering::Relaxed);
+    PARITY.store(!parity, Ordering::Relaxed);
+    if parity {
+    // if player.name.to_lowercase() == "yeahbut" {
         Ok(PlayerAllowed::True(player))
     } else {
         Ok(PlayerAllowed::False("Testing blocking, try again.".to_string()))
