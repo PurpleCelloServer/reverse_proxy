@@ -2,6 +2,7 @@
 
 use std::fs::{self, File};
 use std::io::Read;
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -16,6 +17,13 @@ use purple_cello_mc_protocol::{
     handshake,
     status,
 };
+
+const EXPIRATION_DURATION: Duration = Duration::from_secs(3600);
+
+struct CachedMotds {
+    motd_data: Value,
+    timestamp: Instant,
+}
 
 async fn online_players(
     server_reader: &mut OwnedReadHalf,
@@ -42,18 +50,30 @@ fn load_motds() -> Value {
 
 fn get_motds() -> Value {
     lazy_static! {
-        static ref MOTDS_CACHE: Arc<Mutex<Value>> =
-            Arc::new(Mutex::new(load_motds()));
+        static ref MOTDS_CACHE: Arc<Mutex<Option<CachedMotds>>> =
+            Arc::new(Mutex::new(None));
     }
 
-    let motds_guard = match MOTDS_CACHE.lock() {
-        Ok(guard) => guard,
-        Err(_) => { return Value::Null; }
-    };
+    let mut cache = MOTDS_CACHE.lock().unwrap();
 
-    let motds = (*motds_guard).clone();
+    if let Some(cached_motds) = cache.as_ref() {
+        if cached_motds.timestamp.elapsed() >= EXPIRATION_DURATION {
+            println!("Refreshing MOTD cache");
+            *cache = Some(CachedMotds {
+                motd_data: load_motds(),
+                timestamp: Instant::now(),
+            });
+        }
+    } else {
+        *cache = Some(CachedMotds {
+            motd_data: load_motds(),
+            timestamp: Instant::now(),
+        });
+    }
 
-    std::mem::drop(motds_guard);
+    let motds = cache.as_ref().unwrap().motd_data.clone();
+
+    std::mem::drop(cache);
 
     motds
 }
