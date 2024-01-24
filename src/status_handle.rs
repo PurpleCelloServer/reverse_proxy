@@ -2,12 +2,14 @@
 
 use std::fs::{self, File};
 use std::io::Read;
+use std::sync::{Arc, Mutex};
 
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::AsyncWriteExt;
 use serde_json::Value;
 use base64::{Engine as _, engine::general_purpose};
 use rand::Rng;
+use lazy_static::lazy_static;
 
 use purple_cello_mc_protocol::{
     mc_types::{self, Result, Packet},
@@ -22,19 +24,48 @@ async fn online_players(
     Ok(get_upstream_status(server_reader, server_writer).await?.players)
 }
 
-fn motd() -> String {
-    let default = "A Minecraft Server Proxy".to_string();
+fn load_motds() -> Value {
     let file_path = "./motd.json";
 
     let data = match fs::read_to_string(file_path) {
         Ok(data) => data,
-        Err(_) => return default,
+        Err(_) => return Value::Null,
     };
 
     let motd_data: Value = match serde_json::from_str(&data) {
         Ok(value) => value,
-        Err(_) => return default,
+        Err(_) => return Value::Null,
     };
+
+    motd_data
+}
+
+fn get_motds() -> Value {
+    lazy_static! {
+        static ref MOTDS_CACHE: Arc<Mutex<Value>> =
+            Arc::new(Mutex::new(load_motds()));
+    }
+
+    let motds_guard = match MOTDS_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(_) => { return Value::Null; }
+    };
+
+    let motds = (*motds_guard).clone();
+
+    std::mem::drop(motds_guard);
+
+    motds
+}
+
+fn motd() -> String {
+    let default = "A Minecraft Server Proxy".to_string();
+
+    let motd_data = get_motds();
+
+    if motd_data == Value::Null {
+        return default;
+    }
 
     let length1 = motd_data["line1"].as_array().map_or(0, |v| v.len());
     let length2 = motd_data["line2"].as_array().map_or(0, |v| v.len());
