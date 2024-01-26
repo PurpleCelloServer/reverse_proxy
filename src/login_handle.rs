@@ -127,11 +127,12 @@ fn get_whitelist() -> Vec<Player> {
 }
 
 fn check_player_whitelist(player: Player) -> PlayerAllowed {
-    let whitelist = get_whitelist();
 
     if player.player_uuid.is_none() {
         return PlayerAllowed::False("Invalid UUID".to_string());
     }
+
+    let whitelist = get_whitelist();
 
     let mut invalid_uuid = false;
     let mut invalid_username = false;
