@@ -115,7 +115,7 @@ fn motd() -> String {
 }
 
 fn favicon() -> Option<String> {
-    let file_path = "./main_icon.png";
+    let file_path = "./icon.png";
 
     let mut file = match File::open(file_path) {
         Ok(file) => file,

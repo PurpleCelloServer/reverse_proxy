@@ -1,6 +1,6 @@
 /target
 Cargo.lock
 test_server/*
-main_icon.png
+icon.png
 motd.json
 whitelist.json
