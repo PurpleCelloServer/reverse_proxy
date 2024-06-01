@@ -5,7 +5,6 @@ use std::io::Read;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::AsyncWriteExt;
 use serde_json::Value;
 use base64::{Engine as _, engine::general_purpose};
@@ -13,10 +12,12 @@ use rand::Rng;
 use lazy_static::lazy_static;
 
 use purple_cello_mc_protocol::{
-    mc_types::{self, Result, Packet},
+    mc_types::{self, Result, Packet, ProtocolConnection},
     handshake,
     status,
 };
+
+use crate::listener;
 
 const EXPIRATION_DURATION: Duration = Duration::from_secs(3600);
 
@@ -26,10 +27,10 @@ struct CachedMotds {
 }
 
 async fn online_players(
-    server_reader: &mut OwnedReadHalf,
-    server_writer: &mut OwnedWriteHalf,
+    proxy_info: listener::ProxyInfo,
+    server_conn: &mut ProtocolConnection<'_>,
 ) -> Result<status::clientbound::StatusPlayers> {
-    Ok(get_upstream_status(server_reader, server_writer).await?.players)
+    Ok(get_upstream_status(proxy_info, server_conn).await?.players)
 }
 
 fn load_motds() -> Value {
@@ -135,31 +136,28 @@ fn favicon() -> Option<String> {
 }
 
 pub async fn respond_status(
-    client_reader: &mut OwnedReadHalf,
-    client_writer: &mut OwnedWriteHalf,
-    server_reader: &mut Option<OwnedReadHalf>,
-    server_writer: &mut Option<OwnedWriteHalf>,
+    proxy_info: listener::ProxyInfo,
+    client_conn: &mut ProtocolConnection<'_>,
+    server_conn: &mut Option<ProtocolConnection<'_>>,
 )-> Result<()> {
     loop {
         println!("Status Handling");
         let packet =
-            status::serverbound::StatusPackets::read(client_reader).await?;
+            status::serverbound::StatusPackets::read(client_conn).await?;
         match packet {
             status::serverbound::StatusPackets::Status(_) => {
                 println!("Handling Status");
                 let favicon = favicon();
 
-                let online_players = match server_reader {
-                    Some(server_reader) => match server_writer {
-                        Some(server_writer) => match online_players(
-                            server_reader,
-                            server_writer,
+                let online_players = match server_conn {
+                    Some(server_conn) =>
+                        match online_players(
+                            proxy_info.clone(),
+                            server_conn,
                         ).await {
                             Ok(value) => Some(value),
                             Err(_) => None,
                         },
-                        None => None,
-                    },
                     None => None,
                 };
 
@@ -205,14 +203,14 @@ pub async fn respond_status(
 
                 let packet =
                     status::clientbound::Status::from_json(status_response)?;
-                packet.write(client_writer).await?;
+                packet.write(client_conn).await?;
             },
             status::serverbound::StatusPackets::Ping(packet) => {
                 println!("Handling Ping");
                 let new_packet = status::clientbound::Ping{
                     payload: packet.payload,
                 };
-                new_packet.write(client_writer).await?;
+                new_packet.write(client_conn).await?;
                 break;
             }
         }
@@ -221,39 +219,27 @@ pub async fn respond_status(
 }
 
 pub async fn get_upstream_status(
-    server_reader: &mut OwnedReadHalf,
-    server_writer: &mut OwnedWriteHalf,
+    proxy_info: listener::ProxyInfo,
+    server_conn: &mut ProtocolConnection<'_>,
 ) -> Result<status::clientbound::StatusResponseData> {
     handshake::serverbound::Handshake{
         protocol_version: mc_types::VERSION_PROTOCOL,
-        server_address: "localhost".to_string(),
-        server_port: 25565,
+        server_address: proxy_info.backend_addr,
+        server_port: proxy_info.backend_port,
         next_state: 1,
-    }.write(server_writer).await?;
-    status::serverbound::Status{}.write(server_writer).await?;
-    let packet = status::clientbound::Status::read(server_reader).await?;
+    }.write(server_conn).await?;
+    status::serverbound::Status{}.write(server_conn).await?;
+    let packet = status::clientbound::Status::read(server_conn).await?;
     let status_response = packet.get_json()?;
-
-    // mc_types::write_data(server_writer, &mut vec![0]).await?;
-    // let mut data = mc_types::read_data(server_reader).await?;
-
-    // mc_types::get_u8(&mut data);
-    // let json = mc_types::get_string(&mut data)?;
-    // let status_response: status::clientbound::StatusResponseData =
-    //     serde_json::from_str(&json)?;
-
-    // let mut out_data: Vec<u8> = vec![1];
-    // out_data.append(&mut mc_types::convert_i64(0));
-    // mc_types::write_packet(server_writer, &mut out_data).await?;
 
     Ok(status_response)
 }
 
 pub async fn respond_legacy_status(
-    client_writer: &mut OwnedWriteHalf,
+    client_conn: &mut ProtocolConnection<'_>,
 ) -> Result<()> {
     println!("Old Style Status");
-    client_writer.write_u8(0xFF).await?;
+    client_conn.stream_write.write_u8(0xFF).await?;
 
     let s = "§1\0127\0".to_string() +
         mc_types::VERSION_NAME +
@@ -263,9 +249,9 @@ pub async fn respond_legacy_status(
         .flat_map(|c| std::iter::once(c).chain(std::iter::once(0)))
         .collect();
 
-    client_writer.write_u16((utf16_vec.len() / 2) as u16).await?;
+    client_conn.stream_write.write_u16((utf16_vec.len() / 2) as u16).await?;
     for utf16_char in utf16_vec {
-        client_writer.write_u16(utf16_char).await?;
+        client_conn.stream_write.write_u16(utf16_char).await?;
     }
 
     Ok(())

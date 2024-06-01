@@ -4,12 +4,11 @@ use std::fs;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use serde_json::Value;
 use lazy_static::lazy_static;
 
 use purple_cello_mc_protocol::{
-    mc_types::{self, Result, Packet},
+    mc_types::{self, Result, Packet, ProtocolConnection},
     handshake,
     login,
 };
@@ -164,20 +163,17 @@ fn check_player(player: Player) -> Result<PlayerAllowed> {
 }
 
 pub async fn respond_login(
-    client_reader: &mut OwnedReadHalf,
-    client_writer: &mut OwnedWriteHalf,
-    server_reader: &mut OwnedReadHalf,
-    server_writer: &mut OwnedWriteHalf,
+    client_conn: &mut ProtocolConnection<'_>,
+    server_conn: &mut ProtocolConnection<'_>,
 ) -> Result<bool> {
-    let proxy_login = login_to_proxy(client_reader).await?;
+    let proxy_login = login_to_proxy(client_conn).await?;
     match proxy_login {
         PlayerAllowed::True(player) => {
             println!("Player allowed");
             login_to_backend(
                 player,
-                client_writer,
-                server_reader,
-                server_writer,
+                client_conn,
+                server_conn,
             ).await?;
             return Ok(true)
         },
@@ -185,19 +181,19 @@ pub async fn respond_login(
             println!("Player blocked: {}", msg);
             login::clientbound::Disconnect {
                 reason: format!("{{\"text\":\"{}\"}}", msg.to_string())
-            }.write(client_writer).await?;
+            }.write(client_conn).await?;
             return Ok(false)
         }
     }
 }
 
 async fn login_to_proxy(
-    client_reader: &mut OwnedReadHalf,
+    client_conn: &mut ProtocolConnection<'_>,
 ) -> Result<PlayerAllowed> {
     println!("Logging into proxy");
 
     let start_packet =
-        login::serverbound::LoginStart::read(client_reader).await?;
+        login::serverbound::LoginStart::read(client_conn).await?;
 
     let player: Player = Player {
         name: start_packet.name,
@@ -209,9 +205,8 @@ async fn login_to_proxy(
 
 async fn login_to_backend(
     player: Player,
-    client_writer: &mut OwnedWriteHalf,
-    server_reader: &mut OwnedReadHalf,
-    server_writer: &mut OwnedWriteHalf,
+    client_conn: &mut ProtocolConnection<'_>,
+    server_conn: &mut ProtocolConnection<'_>,
 ) -> Result<()> {
     println!("Logging into backend");
     handshake::serverbound::Handshake {
@@ -219,23 +214,23 @@ async fn login_to_backend(
         server_address: "localhost".to_string(),
         server_port: 25565,
         next_state: 2,
-    }.write(server_writer).await?;
+    }.write(server_conn).await?;
 
     println!("Login start");
     login::serverbound::LoginStart {
         name: player.name,
         player_uuid: player.player_uuid,
-    }.write(server_writer).await?;
+    }.write(server_conn).await?;
 
     println!("Finishing backend login");
-    let packet = login::clientbound::LoginSuccess::read(server_reader).await?;
+    let packet = login::clientbound::LoginSuccess::read(server_conn).await?;
 
     println!("Finishing proxy login");
     login::clientbound::LoginSuccess {
         uuid: packet.uuid.clone(),
         username: packet.username.clone(),
         properties: packet.properties.clone(),
-    }.write(client_writer).await?;
+    }.write(client_conn).await?;
 
     println!("Client logged in");
 
