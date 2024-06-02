@@ -13,6 +13,8 @@ use purple_cello_mc_protocol::{
     login,
 };
 
+use crate::listener;
+
 const EXPIRATION_DURATION: Duration = Duration::from_secs(3600);
 
 struct CachedWhitelist {
@@ -150,27 +152,46 @@ fn check_player_whitelist(player: Player) -> PlayerAllowed {
         PlayerAllowed::False("Invalid UUID".to_string())
     } else if invalid_username {
         PlayerAllowed::False(
-            "Invalid Username, please contact the server admin to update your \
-                username: purplecelloserver@gmail.com".to_string()
+            "Invalid Username!\nPlease contact the admins to update your \
+username:\npurplecelloserver@gmail.com".to_string()
         )
     } else {
-        PlayerAllowed::False("Not whitelisted on this server".to_string())
+        PlayerAllowed::False("Not whitelisted on this server.\n\
+Please direct whitelist requests to the admins:\n\
+purplecelloserver@gmail.com".to_string())
     }
 }
 
-fn check_player(player: Player) -> Result<PlayerAllowed> {
+async fn check_player_online(
+    proxy_info: &listener::ProxyInfo,
+    player: Player,
+    client_conn: &mut ProtocolConnection<'_>,
+) -> Result<PlayerAllowed> {
+    let encryption_request = client_conn.create_encryption_request(
+        proxy_info.private_key.clone())?;
+    encryption_request.write(client_conn).await?;
+    let encryption_response =
+        login::serverbound::EncryptionResponse::read(client_conn).await?;
+    client_conn.handle_encryption_response(encryption_response)?;
+    // TODO: Make authentication verification request
+    Ok(check_player_whitelist(player))
+}
+
+fn check_player_offline(player: Player) -> Result<PlayerAllowed> {
     Ok(check_player_whitelist(player))
 }
 
 pub async fn respond_login(
+    proxy_info: &listener::ProxyInfo,
     client_conn: &mut ProtocolConnection<'_>,
     server_conn: &mut ProtocolConnection<'_>,
 ) -> Result<bool> {
-    let proxy_login = login_to_proxy(client_conn).await?;
+    let proxy_login = login_to_proxy(proxy_info, client_conn).await?;
     match proxy_login {
         PlayerAllowed::True(player) => {
             println!("Player allowed");
             login_to_backend(
+                proxy_info,
                 player,
                 client_conn,
                 server_conn,
@@ -188,6 +209,7 @@ pub async fn respond_login(
 }
 
 async fn login_to_proxy(
+    proxy_info: &listener::ProxyInfo,
     client_conn: &mut ProtocolConnection<'_>,
 ) -> Result<PlayerAllowed> {
     println!("Logging into proxy");
@@ -200,10 +222,16 @@ async fn login_to_proxy(
         player_uuid: start_packet.player_uuid,
     };
 
-    check_player(player)
+    match proxy_info.online_status {
+        listener::OnlineStatus::Online =>
+            check_player_online(proxy_info, player, client_conn).await,
+        listener::OnlineStatus::Offline =>
+            check_player_offline(player),
+    }
 }
 
 async fn login_to_backend(
+    proxy_info: &listener::ProxyInfo,
     player: Player,
     client_conn: &mut ProtocolConnection<'_>,
     server_conn: &mut ProtocolConnection<'_>,
@@ -211,8 +239,8 @@ async fn login_to_backend(
     println!("Logging into backend");
     handshake::serverbound::Handshake {
         protocol_version: mc_types::VERSION_PROTOCOL,
-        server_address: "localhost".to_string(),
-        server_port: 25565,
+        server_address: proxy_info.backend_addr.clone(),
+        server_port: proxy_info.backend_port,
         next_state: 2,
     }.write(server_conn).await?;
 

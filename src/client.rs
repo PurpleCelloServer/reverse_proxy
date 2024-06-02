@@ -1,6 +1,6 @@
 // Yeahbut May 2024
 
-use std::error::Error;
+use std::mem;
 use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 
 use purple_cello_mc_protocol::{
@@ -64,6 +64,7 @@ pub async fn handle_client(
                 match server_conn {
                     Some(mut server_conn) => {
                         if login_handle::respond_login(
+                            &proxy_info,
                             &mut client_conn,
                             &mut server_conn,
                         ).await.expect(
@@ -79,7 +80,9 @@ pub async fn handle_client(
                     }
                     None => {
                         login::clientbound::Disconnect {
-                            reason: "\"Server Error (Server may be starting)\""
+                            reason: "\"Server Error (Server is down or \
+restarting)\nPlease contact the admins if the issue persists:\n\
+purplecelloserver@gmail.com\""
                                 .to_string()
                         }
                             .write(&mut client_conn)
@@ -122,24 +125,34 @@ Failed to connect to the backend server");
     println!("Connection Closed");
 }
 
-async fn handle_play(
-    mut client_conn: ProtocolConnection<'_>,
-    mut server_conn: ProtocolConnection<'_>,
-) -> Result<(), Box<dyn Error>> {
+async fn handle_play<'a>(
+    mut client_conn: ProtocolConnection<'a>,
+    mut server_conn: ProtocolConnection<'a>,
+) {
+    let client_conn: &mut ProtocolConnection<'static> =
+        unsafe { mem::transmute(&mut client_conn) };
+    let server_conn: &mut ProtocolConnection<'static> =
+        unsafe { mem::transmute(&mut server_conn) };
+
+    let (mut client_write_conn, mut client_read_conn) =
+        client_conn.split_conn().expect(
+            "Error copying from client to backend");
+    let (mut server_write_conn, mut server_read_conn) =
+        server_conn.split_conn().expect(
+            "Error copying from backend to client");
+
     // Forward from client to backend
-    let to_backend = tokio::spawn(client_conn.forward_play(&mut server_conn));
+    let to_backend = tokio::spawn(async move {
+        client_read_conn.forward_play(&mut server_write_conn).await.expect(
+            "Error copying from client to backend");
+    });
 
     // Forward from backend to client
-    // let to_client = tokio::spawn(async move {
-    // io::copy(
-    //     &mut server_conn.stream_read,
-    //     &mut client_conn.stream_write,
-    // ).await.expect(
-    //     "Error copying from backend to client");
-    // });
-    let to_client = tokio::spawn(server_conn.forward_play(&mut client_conn));
+    let to_client = tokio::spawn(async move {
+        server_read_conn.forward_play(&mut client_write_conn).await.expect(
+            "Error copying from backend to client");
+    });
 
-    tokio::try_join!(to_backend, to_client)?;
-
-    Ok(())
+    tokio::try_join!(to_backend, to_client).expect(
+        "Error copying between the client and backend");
 }

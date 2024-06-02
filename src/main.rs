@@ -2,20 +2,23 @@
 
 use std::error::Error;
 
+use purple_cello_mc_protocol::encrypt;
+
 mod status_handle;
 mod login_handle;
 mod client;
 mod listener;
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let private_key = encrypt::generate_rsa_keys()?;
     let offline_info = listener::ProxyInfo{
         proxy_addr: "127.0.0.1".to_string(),
         proxy_port: 25565,
         online_status: listener::OnlineStatus::Offline,
         backend_addr: "127.0.0.1".to_string(),
         backend_port: 25564,
+        private_key: private_key.clone(),
     };
     let online_info = listener::ProxyInfo{
         proxy_addr: "127.0.0.1".to_string(),
@@ -23,6 +26,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         online_status: listener::OnlineStatus::Online,
         backend_addr: "127.0.0.1".to_string(),
         backend_port: 25564,
+        private_key: private_key.clone(),
     };
 
     let listener_offline: listener::TcpListenerWrapper =

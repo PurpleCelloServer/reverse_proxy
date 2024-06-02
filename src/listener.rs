@@ -2,6 +2,7 @@
 
 use tokio::net::TcpListener;
 use std::error::Error;
+use rsa::RsaPrivateKey;
 
 #[derive(Copy, Clone)]
 pub enum OnlineStatus {
@@ -16,6 +17,7 @@ pub struct ProxyInfo {
     pub online_status: OnlineStatus,
     pub backend_addr: String,
     pub backend_port: u16,
+    pub private_key: RsaPrivateKey,
 }
 
 impl ProxyInfo {

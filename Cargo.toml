@@ -8,10 +8,11 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-purple_cello_mc_protocol = { git = "https://github.com/PurpleCelloServer/purple_cello_mc_protocol.git", rev = "505adfb92c44db44a89effa4d38ebb863c2c60d0" }
+purple_cello_mc_protocol = { git = "https://github.com/PurpleCelloServer/purple_cello_mc_protocol.git", rev = "9ff2e95c66b1d773362936733273350e4bdd399a" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.21.5"
 rand = "0.8.5"
 lazy_static = "1.4"
+rsa = "0.6"
