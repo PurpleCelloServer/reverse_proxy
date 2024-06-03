@@ -4,6 +4,8 @@ use tokio::net::TcpListener;
 use std::error::Error;
 use rsa::RsaPrivateKey;
 
+use crate::whitelist::Whitelist;
+
 #[derive(Copy, Clone)]
 pub enum OnlineStatus {
     Online,
@@ -25,6 +27,7 @@ pub struct ProxyInfo {
     pub private_key: RsaPrivateKey,
     pub online_status: OnlineStatus,
     pub authentication_method: AuthenticationMethod,
+    pub whitelist: Whitelist,
 }
 
 impl ProxyInfo {

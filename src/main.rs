@@ -8,6 +8,7 @@ mod status_handle;
 mod login_handle;
 mod client;
 mod listener;
+mod whitelist;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -20,6 +21,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         private_key: private_key.clone(),
         online_status: listener::OnlineStatus::Offline,
         authentication_method: listener::AuthenticationMethod::None,
+        whitelist: whitelist::Whitelist::WhitelistOpen(
+            whitelist::WhitelistOpen{}),
     };
     let online_info = listener::ProxyInfo{
         proxy_addr: "127.0.0.1".to_string(),
@@ -29,6 +32,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         private_key: private_key.clone(),
         online_status: listener::OnlineStatus::Online,
         authentication_method: listener::AuthenticationMethod::Mojang,
+        whitelist: whitelist::Whitelist::WhitelistFile(
+            whitelist::WhitelistFile::new("./whitelist.json".to_string())),
     };
 
     let listener_offline: listener::TcpListenerWrapper =

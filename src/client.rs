@@ -15,7 +15,7 @@ use crate::listener;
 
 pub async fn handle_client(
     client_socket: TcpStream,
-    proxy_info: listener::ProxyInfo,
+    mut proxy_info: listener::ProxyInfo,
 ) {
     println!("Accepting Connection");
     let backend_addr = proxy_info.formatted_backend_address();
@@ -64,7 +64,7 @@ pub async fn handle_client(
                 match server_conn {
                     Some(mut server_conn) => {
                         if login_handle::respond_login(
-                            &proxy_info,
+                            &mut proxy_info,
                             &mut client_conn,
                             &mut server_conn,
                         ).await.expect(
