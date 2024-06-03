@@ -12,6 +12,7 @@ use purple_cello_mc_protocol::{
 use crate::status_handle;
 use crate::login_handle;
 use crate::listener;
+use crate::info_messages;
 
 pub async fn handle_client(
     client_socket: TcpStream,
@@ -80,9 +81,7 @@ pub async fn handle_client(
                     }
                     None => {
                         login::clientbound::Disconnect {
-                            reason: "\"Server Error (Server is down or \
-restarting)\nPlease contact the admins if the issue persists:\n\
-purplecelloserver@gmail.com\""
+                            reason: info_messages::BACKEND_DOWN_DISCONNECT
                                 .to_string()
                         }
                             .write(&mut client_conn)

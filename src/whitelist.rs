@@ -2,11 +2,11 @@
 
 use std::fs;
 use std::time::{Duration, Instant};
-
 use serde_json::Value;
 
-const EXPIRATION_DURATION: Duration = Duration::from_secs(10);
-// const EXPIRATION_DURATION: Duration = Duration::from_secs(60);
+use crate::info_messages;
+
+const EXPIRATION_DURATION: Duration = Duration::from_secs(60);
 
 #[derive(PartialEq)]
 pub struct Player {
@@ -146,7 +146,7 @@ impl WhitelistFile {
 
         if player.player_uuid.is_none() {
             return PlayerAllowed::False(
-                "Invalid UUID (UUID Missing)".to_string());
+                info_messages::UUID_MISSING_DISCONNECT.to_string());
         }
 
         let whitelist = self.get_whitelist();
@@ -173,21 +173,17 @@ impl WhitelistFile {
         }
 
         if is_inactive {
-            PlayerAllowed::False("Whitelist Status Inactive!\n\
-Please contact the admins to reactivate:\n\
-purplecelloserver@gmail.com".to_string()
-            )
+            PlayerAllowed::False(
+                info_messages::WHITELIST_STATUS_INACTIVE_DISCONNECT.to_string())
         } else if invalid_username {
-            PlayerAllowed::False("Invalid Username!\n\
-Please contact the admins to update your username:\n\
-purplecelloserver@gmail.com".to_string()
-            )
+            PlayerAllowed::False(
+                info_messages::USERNAME_INVALID_DISCONNECT.to_string())
         } else if invalid_uuid {
-            PlayerAllowed::False("Invalid UUID".to_string())
+            PlayerAllowed::False(
+                info_messages::UUID_INVALID_DISCONNECT.to_string())
         } else {
-            PlayerAllowed::False("Not whitelisted on this server.\n\
-Please direct whitelist requests to the admins:\n\
-purplecelloserver@gmail.com".to_string())
+            PlayerAllowed::False(
+                info_messages::NOT_WHITELISTED_DISCONNECT.to_string())
         }
     }
 

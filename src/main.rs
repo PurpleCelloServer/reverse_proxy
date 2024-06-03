@@ -9,6 +9,7 @@ mod login_handle;
 mod client;
 mod listener;
 mod whitelist;
+mod info_messages;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

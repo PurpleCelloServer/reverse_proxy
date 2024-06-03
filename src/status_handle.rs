@@ -18,6 +18,7 @@ use purple_cello_mc_protocol::{
 };
 
 use crate::listener;
+use crate::info_messages;
 
 const EXPIRATION_DURATION: Duration = Duration::from_secs(3600);
 
@@ -187,8 +188,8 @@ pub async fn respond_status(
                                 protocol: 0,
                             },
                             description: mc_types::Chat {
-                                text: "Server Error (Server may be starting)"
-                                    .to_string() + "\nPurple Cello Server",
+                                text: info_messages::BACKEND_DOWN_PING
+                                    .to_string(),
                             },
                             players: status::clientbound::StatusPlayers {
                                 max: 0,
