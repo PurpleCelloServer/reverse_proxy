@@ -6,7 +6,8 @@ use serde_json::Value;
 
 use crate::info_messages;
 
-const EXPIRATION_DURATION: Duration = Duration::from_secs(60);
+// Refresh every 5 minutes
+const EXPIRATION_DURATION: Duration = Duration::from_secs(300);
 
 #[derive(PartialEq)]
 pub struct Player {

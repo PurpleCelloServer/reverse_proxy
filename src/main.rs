@@ -10,6 +10,7 @@ mod client;
 mod listener;
 mod whitelist;
 mod info_messages;
+mod motd;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
