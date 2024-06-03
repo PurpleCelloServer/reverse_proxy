@@ -15,18 +15,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let offline_info = listener::ProxyInfo{
         proxy_addr: "127.0.0.1".to_string(),
         proxy_port: 25565,
-        online_status: listener::OnlineStatus::Offline,
         backend_addr: "127.0.0.1".to_string(),
         backend_port: 25564,
         private_key: private_key.clone(),
+        online_status: listener::OnlineStatus::Offline,
+        authentication_method: listener::AuthenticationMethod::None,
     };
     let online_info = listener::ProxyInfo{
         proxy_addr: "127.0.0.1".to_string(),
         proxy_port: 25566,
-        online_status: listener::OnlineStatus::Online,
         backend_addr: "127.0.0.1".to_string(),
         backend_port: 25564,
         private_key: private_key.clone(),
+        online_status: listener::OnlineStatus::Online,
+        authentication_method: listener::AuthenticationMethod::Mojang,
     };
 
     let listener_offline: listener::TcpListenerWrapper =

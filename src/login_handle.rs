@@ -175,14 +175,21 @@ async fn check_player(
                 proxy_info.private_key.clone())?;
             encryption_request.write(client_conn).await?;
             let encryption_response =
-                login::serverbound::EncryptionResponse::read(client_conn).await?;
+                login::serverbound::EncryptionResponse::read(
+                    client_conn).await?;
             client_conn.handle_encryption_response(encryption_response)?;
             let server_id = client_conn.server_id_hash().await?;
-            match multiplayer_auth::joined(&player.name, &server_id, None).await {
-                Ok(_) => Ok(check_player_whitelist(player)),
-                Err(_) =>
-                    Ok(PlayerAllowed::False(
-                        "Mojang Authentication Failed".to_string())),
+            match proxy_info.authentication_method {
+                listener::AuthenticationMethod::Mojang => {
+                    match multiplayer_auth::joined(
+                        &player.name, &server_id, None).await {
+                            Ok(_) => Ok(check_player_whitelist(player)),
+                            Err(_) => Ok(PlayerAllowed::False(
+                                "Mojang Authentication Failed".to_string()
+                            )),
+                    }},
+                listener::AuthenticationMethod::None =>
+                    Ok(check_player_whitelist(player))
             }
         },
         listener::OnlineStatus::Offline =>

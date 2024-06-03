@@ -10,14 +10,21 @@ pub enum OnlineStatus {
     Offline,
 }
 
+#[derive(Copy, Clone)]
+pub enum AuthenticationMethod {
+    Mojang,
+    None,
+}
+
 #[derive(Clone)]
 pub struct ProxyInfo {
     pub proxy_addr: String,
     pub proxy_port: u16,
-    pub online_status: OnlineStatus,
     pub backend_addr: String,
     pub backend_port: u16,
     pub private_key: RsaPrivateKey,
+    pub online_status: OnlineStatus,
+    pub authentication_method: AuthenticationMethod,
 }
 
 impl ProxyInfo {
